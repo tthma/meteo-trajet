@@ -93,22 +93,44 @@
   .modal-b pre{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--txt);margin:0;line-height:1.5}
   .modal-f{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px}
   .modal-f button{flex:1}
-  /* Responsive mobile */
+  /* Poignée du bottom sheet (mobile only) */
+  .sheet-handle{display:none}
+  /* Responsive mobile : carte plein écran + panneau tiroir */
   @media (max-width:760px){
-    body{overflow:auto}
-    #app{flex-direction:column;height:auto;min-height:100vh}
-    #side{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--line);max-height:none}
-    #map{height:60vh;min-height:340px;flex:none}
-    .scroll{max-height:none;overflow:visible}
-    header h1{font-size:17px}
-    .sugg{right:42px}
+    body{overflow:hidden}
+    #app{display:block;height:100dvh}
+    /* la carte occupe tout l'écran, en fond */
+    #map{position:fixed;inset:0;height:100dvh;width:100vw;z-index:1}
+    /* le panneau devient un tiroir qui glisse depuis le bas */
+    #side{position:fixed;left:0;right:0;bottom:0;width:100%;min-width:0;z-index:1000;
+      max-height:88dvh;border-right:none;border-top:1px solid var(--line);
+      border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.5);
+      transform:translateY(calc(100% - 128px)); /* état réduit : header + poignée visibles */
+      transition:transform .32s cubic-bezier(.4,0,.2,1)}
+    #side.open{transform:translateY(0)}
+    .sheet-handle{display:block;width:40px;height:5px;border-radius:3px;background:var(--line);
+      margin:8px auto 2px;cursor:grab;flex:0 0 auto}
+    header{padding:6px 18px 12px;cursor:pointer;flex:0 0 auto}
+    header h1{font-size:16px}
+    header p{font-size:11px}
+    .scroll{max-height:none;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px}
+    /* champs un peu plus compacts */
+    input,select,textarea{padding:8px 10px;font-size:16px} /* 16px évite le zoom auto iOS */
+    .grp{margin-bottom:12px}
+    label{font-size:11px;margin-bottom:4px}
+    button{padding:11px 12px}
+    .cityRow .del{width:40px}
+    .sugg{right:44px}
+    /* la modale résumé passe au-dessus du tiroir */
+    .modal-bg{z-index:3000}
   }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="side">
-    <header>
+    <div class="sheet-handle" id="sheetHandle"></div>
+    <header id="sheetHeader">
       <h1>🏍️ Météo Trajet</h1>
       <p>Villes ou fichier GPX · prévisions par point</p>
     </header>
@@ -533,8 +555,40 @@ document.getElementById('go').addEventListener('click', async ()=>{
     }
     const data=await forecast(pts, iso);
     render(data, routeLL);
+    // sur mobile, referme le tiroir pour révéler la carte + le résultat
+    if(window.matchMedia('(max-width:760px)').matches) closeSheet();
   }catch(err){ res.innerHTML=`<div class="msg">❌ ${err.message}</div>`; }
 });
+
+// --- Bottom sheet mobile ---
+const side = document.getElementById('side');
+function openSheet(){ side.classList.add('open'); }
+function closeSheet(){ side.classList.remove('open'); setTimeout(()=>map.invalidateSize(),350); }
+function toggleSheet(){ side.classList.contains('open') ? closeSheet() : openSheet(); }
+
+document.getElementById('sheetHandle').addEventListener('click', toggleSheet);
+document.getElementById('sheetHeader').addEventListener('click', ()=>{ if(!side.classList.contains('open')) openSheet(); });
+
+// glissement tactile sur la poignée/header
+let dragY0=null, dragOpen0=false;
+function onStart(e){ dragY0=e.touches?e.touches[0].clientY:e.clientY; dragOpen0=side.classList.contains('open'); }
+function onEnd(e){
+  if(dragY0===null) return;
+  const y1=(e.changedTouches?e.changedTouches[0].clientY:e.clientY);
+  const dy=y1-dragY0;
+  if(dy<-40) openSheet();      // glissé vers le haut → ouvre
+  else if(dy>40) closeSheet(); // glissé vers le bas → ferme
+  dragY0=null;
+}
+['sheetHandle','sheetHeader'].forEach(id=>{
+  const el=document.getElementById(id);
+  el.addEventListener('touchstart', onStart, {passive:true});
+  el.addEventListener('touchend', onEnd, {passive:true});
+});
+
+// recalcule la taille de la carte au chargement et au redimensionnement
+window.addEventListener('resize', ()=>map.invalidateSize());
+setTimeout(()=>map.invalidateSize(),300);
 </script>
 </body>
 </html>
