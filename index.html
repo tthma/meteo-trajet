@@ -19,7 +19,9 @@
   .scroll{flex:1;overflow-y:auto;padding:14px 16px}
   .grp{margin-bottom:16px}
   label{display:block;font-size:12px;color:var(--mut);margin:0 0 6px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
-  textarea,input,select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;font-size:14px;font-family:inherit}
+  textarea,input,select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;font-size:16px;font-family:inherit}
+  input[type=time]{text-align:left}
+  input[type=time]::-webkit-date-and-time-value{text-align:left}
   textarea{resize:vertical;min-height:90px}
   .cityRow{position:relative;display:flex;gap:6px;margin-bottom:6px}
   .cityRow input{flex:1}
@@ -116,7 +118,7 @@
     header p{font-size:11px}
     .scroll{max-height:none;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px}
     /* champs un peu plus compacts */
-    input,select,textarea{padding:8px 10px;font-size:16px} /* 16px évite le zoom auto iOS */
+    input,select,textarea{padding:8px 10px} /* compact ; font-size 16px déjà global (anti-zoom iOS) */
     .grp{margin-bottom:12px}
     label{font-size:11px;margin-bottom:4px}
     button{padding:11px 12px}
