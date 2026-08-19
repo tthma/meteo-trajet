@@ -32,6 +32,7 @@
   .sugg div:hover,.sugg div.sel{background:var(--bg);color:var(--acc)}
   .row{display:flex;gap:8px}
   .row>*{flex:1}
+  .sublbl{display:block;font-size:10px;color:var(--mut);margin-bottom:3px;text-transform:none;letter-spacing:0}
   button{cursor:pointer;border:none;border-radius:8px;padding:10px 12px;font-size:14px;font-weight:600;font-family:inherit}
   .btn-p{background:var(--acc);color:#111}
   .btn-p:hover{background:#ff9142}
@@ -150,10 +151,16 @@
         <select id="day"></select>
       </div>
       <div class="grp">
-        <label>Heure de départ (estimation arrivée par point)</label>
+        <label>Départ &amp; vitesse (estimation arrivée par point)</label>
         <div class="row">
-          <input type="time" id="start" value="09:00">
-          <input type="number" id="speed" value="65" min="20" max="130" title="Vitesse moyenne km/h">
+          <div>
+            <span class="sublbl">Heure</span>
+            <input type="time" id="start" value="09:00">
+          </div>
+          <div>
+            <span class="sublbl">Vitesse (km/h)</span>
+            <input type="number" id="speed" value="65" min="20" max="130" title="Vitesse moyenne en km/h">
+          </div>
         </div>
       </div>
       <div class="grp">
@@ -182,7 +189,8 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const map = L.map('map').setView([48.4, 2.4], 8);
+const map = L.map('map', {attributionControl:false}).setView([48.4, 2.4], 8);
+L.control.attribution({prefix:false}).addTo(map);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'© OpenStreetMap', maxZoom:19
 }).addTo(map);
