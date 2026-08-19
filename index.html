@@ -344,19 +344,42 @@ function parseGPX(text){
     lat:+p.getAttribute('lat'), lon:+p.getAttribute('lon')
   })).filter(p=>!isNaN(p.lat));
   if(!pts.length) throw new Error('Aucun point dans le GPX');
-  // échantillonnage : ~1 point tous les 25 km, max 12 points
   const hav=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
     const dLat=r(b.lat-a.lat),dLon=r(b.lon-a.lon);
     const x=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
     return R*2*Math.asin(Math.sqrt(x));};
-  const out=[pts[0]]; let acc=0;
-  for(let i=1;i<pts.length;i++){ acc+=hav(pts[i-1],pts[i]);
-    if(acc>=25){ out.push(pts[i]); acc=0; } }
-  if(out[out.length-1]!==pts[pts.length-1]) out.push(pts[pts.length-1]);
-  const step = Math.ceil(out.length/12);
-  const sampled = out.filter((_,i)=>i%step===0);
-  if(sampled[sampled.length-1]!==out[out.length-1]) sampled.push(out[out.length-1]);
-  return sampled.map((p,i)=>({...p, name:i===0?'Départ':i===sampled.length-1?'Arrivée':`Point ${i}`}));
+  // trace brute complète pour l'affichage (fidèle au fichier)
+  let trackLL = pts.map(p=>[p.lat,p.lon]);
+  // si la trace est très dense (>2000 pts), on en garde 1 sur N pour alléger le rendu
+  // sans dénaturer la forme (on garde toujours départ et arrivée)
+  if(trackLL.length>2000){
+    const keep=Math.ceil(trackLL.length/2000);
+    trackLL = trackLL.filter((_,i)=>i%keep===0 || i===trackLL.length-1);
+  }
+  // distance cumulée le long de la trace
+  const cum=[0];
+  for(let i=1;i<pts.length;i++) cum.push(cum[i-1]+hav(pts[i-1],pts[i]));
+  const total=cum[cum.length-1];
+  // points météo : un tous les ~35 km le long de la VRAIE trace
+  const stepKm=35;
+  const weatherPts=[];
+  let nextD=0, wi=0;
+  for(let i=0;i<pts.length;i++){
+    if(cum[i]>=nextD || i===0 || i===pts.length-1){
+      // évite les doublons trop proches
+      if(!weatherPts.length || cum[i]-weatherPts[weatherPts.length-1].routeKm>=stepKm*0.5 || i===pts.length-1){
+        const isFirst=i===0, isLast=i===pts.length-1;
+        weatherPts.push({
+          lat:pts[i].lat, lon:pts[i].lon,
+          name: isFirst?'Départ':isLast?'Arrivée':`${Math.round(cum[i])} km`,
+          mid: !isFirst && !isLast,
+          routeKm: cum[i]
+        });
+        nextD=cum[i]+stepKm;
+      }
+    }
+  }
+  return {weatherPts, trackLL, totalKm: total};
 }
 
 // --- Récupère la géométrie de la route OSRM (liste de [lat,lon]) ---
@@ -550,16 +573,16 @@ document.getElementById('dlSummary').addEventListener('click', ()=>{
 });
 
 // --- Événements ---
-let gpxPoints=null;
+let gpxData=null; // {weatherPts, trackLL, totalKm}
 document.getElementById('gpx').addEventListener('change', e=>{
   const f=e.target.files[0]; if(!f) return;
   document.getElementById('gpxLbl').textContent='📁 '+f.name;
   const rd=new FileReader();
-  rd.onload=ev=>{ try{ gpxPoints=parseGPX(ev.target.result); }
-    catch(err){ alert(err.message); gpxPoints=null; } };
+  rd.onload=ev=>{ try{ gpxData=parseGPX(ev.target.result); }
+    catch(err){ alert(err.message); gpxData=null; } };
   rd.readAsText(f);
 });
-document.getElementById('cityList').addEventListener('input',()=>{ gpxPoints=null;
+document.getElementById('cityList').addEventListener('input',()=>{ gpxData=null;
   document.getElementById('gpx').value=''; document.getElementById('gpxLbl').textContent='📁 Importer un fichier GPX'; });
 
 document.getElementById('go').addEventListener('click', async ()=>{
@@ -569,10 +592,10 @@ document.getElementById('go').addEventListener('click', async ()=>{
   document.getElementById('summary').disabled = true;
   try{
     let pts, routeLL=null;
-    if(gpxPoints){
-      pts=gpxPoints;
-      // route qui suit les points du GPX
-      routeLL = await fetchRouteGeometry(pts);
+    if(gpxData){
+      // GPX : on suit EXACTEMENT la trace du fichier, pas de recalcul OSRM
+      pts = gpxData.weatherPts;
+      routeLL = gpxData.trackLL;
     }else{
       const rows = [...cityList.querySelectorAll('.cityRow')];
       let waypoints=[];
