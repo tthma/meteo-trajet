@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Météo Trajet Moto</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏍️</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   :root{--bg:#0f1620;--panel:#1a2634;--acc:#ff7a1a;--txt:#e8edf2;--mut:#8ba0b5;--line:#2a3a4d;}
@@ -217,7 +218,7 @@ function addCityRow(value=''){
     row.dataset.lat=''; row.dataset.lon=''; input.classList.remove('ok');
     clearTimeout(timer);
     const q = input.value.trim();
-    if(q.length<2){ closeSugg(); return; }
+    if(q.length<3){ closeSugg(); return; }
     timer = setTimeout(async ()=>{
       try{
         const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&type=municipality&limit=6`;
