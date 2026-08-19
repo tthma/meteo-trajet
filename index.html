@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Météo Trajet Moto</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root{--bg:#0f1620;--panel:#1a2634;--acc:#ff7a1a;--txt:#e8edf2;--mut:#8ba0b5;--line:#2a3a4d;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt);height:100vh;overflow:hidden}
+  #app{display:flex;height:100vh}
+  #side{width:380px;min-width:380px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+  #map{flex:1}
+  header{padding:16px 18px;border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:18px;font-weight:700}
+  header p{margin:4px 0 0;font-size:12px;color:var(--mut)}
+  .scroll{flex:1;overflow-y:auto;padding:14px 16px}
+  .grp{margin-bottom:16px}
+  label{display:block;font-size:12px;color:var(--mut);margin:0 0 6px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  textarea,input,select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;font-size:14px;font-family:inherit}
+  textarea{resize:vertical;min-height:90px}
+  .cityRow{position:relative;display:flex;gap:6px;margin-bottom:6px}
+  .cityRow input{flex:1}
+  .cityRow .del{flex:0 0 auto;width:36px;padding:0;background:var(--bg);border:1px solid var(--line);color:var(--mut);border-radius:8px;font-size:18px}
+  .cityRow .del:hover{border-color:var(--acc);color:var(--acc)}
+  .cityRow input.ok{border-color:#3a7d3a}
+  .sugg{position:absolute;top:100%;left:0;right:42px;z-index:1000;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-top:2px;max-height:200px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,.5)}
+  .sugg div{padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
+  .sugg div:last-child{border-bottom:none}
+  .sugg div:hover,.sugg div.sel{background:var(--bg);color:var(--acc)}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  button{cursor:pointer;border:none;border-radius:8px;padding:10px 12px;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-p{background:var(--acc);color:#111}
+  .btn-p:hover{background:#ff9142}
+  .btn-s{background:var(--bg);color:var(--txt);border:1px solid var(--line)}
+  .btn-s:hover{border-color:var(--acc)}
+  .file-lbl{display:block;text-align:center;background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:14px;font-size:13px;color:var(--mut);cursor:pointer}
+  .file-lbl:hover{border-color:var(--acc);color:var(--txt)}
+  input[type=file]{display:none}
+  .sep{text-align:center;color:var(--mut);font-size:12px;margin:14px 0;position:relative}
+  .sep::before,.sep::after{content:"";position:absolute;top:50%;width:40%;height:1px;background:var(--line)}
+  .sep::before{left:0}.sep::after{right:0}
+  .pt{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+  .pt-h{display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:14px}
+  .pt-h .t{color:var(--mut);font-size:12px;font-weight:400}
+  .pt-b{display:flex;align-items:center;gap:10px;margin-top:6px}
+  .pt-b .ic{font-size:26px}
+  .pt-b .tp{font-size:20px;font-weight:700}
+  .pt-b .ds{font-size:12px;color:var(--mut)}
+  .rain{color:#4aa3ff}
+  .warn{color:var(--acc)}
+  .msg{font-size:13px;color:var(--mut);text-align:center;padding:20px}
+  .spin{border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;width:22px;height:22px;animation:s 1s linear infinite;margin:20px auto}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .wsign{background:var(--panel);border:2px solid #4aa3ff;border-radius:10px;padding:3px 7px;
+    display:flex;flex-direction:column;align-items:center;gap:1px;box-shadow:0 3px 8px rgba(0,0,0,.4);white-space:nowrap;font-weight:700;
+    position:absolute;transform:translate(-50%,-100%);margin-top:-6px}
+  .wsign .wtop{display:flex;align-items:center;gap:3px}
+  .wsign.risk{border-color:var(--acc)}
+  .wsign .we{font-size:17px;line-height:1}
+  .wsign .wt{font-size:13px;color:var(--txt)}
+  .wsign .wsub{font-size:10px;font-weight:600;color:var(--mut);line-height:1;display:flex;gap:5px}
+  .wsign .wsub .r{color:#4aa3ff}
+  .wsign::after{content:"";position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);
+    border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid #4aa3ff}
+  .wsign.risk::after{border-top-color:var(--acc)}
+  .wsign.mid{border-color:#5a6b7d;opacity:.94;padding:2px 6px}
+  .wsign.mid .we{font-size:15px}
+  .wsign.mid .wt{font-size:12px}
+  .wsign.mid .wsub{font-size:9px}
+  .wsign.mid::after{border-top-color:#5a6b7d}
+  .wsign.mid.risk{border-color:var(--acc)}
+  .wsign.mid.risk::after{border-top-color:var(--acc)}
+  .pt-mid{opacity:.85;border-style:dashed}
+  .pt-mid .pt-h span:first-child{color:var(--mut);font-weight:500}
+  .leaflet-popup-content{font-family:inherit;font-size:13px}
+  .pop-t{font-weight:700;margin-bottom:2px}
+  .pop-w{display:flex;align-items:center;gap:8px}
+  .pop-w .e{font-size:22px}
+  /* Bouton résumé + modale */
+  .btn-sum{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);margin-top:8px}
+  .btn-sum:hover{border-color:var(--acc);color:var(--acc)}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:2000;display:none;align-items:center;justify-content:center;padding:16px}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:640px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+  .modal-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .modal-h h2{margin:0;font-size:16px}
+  .modal-h .x{cursor:pointer;background:none;border:none;color:var(--mut);font-size:22px;padding:0 4px}
+  .modal-b{padding:14px 18px;overflow-y:auto}
+  .modal-b pre{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--txt);margin:0;line-height:1.5}
+  .modal-f{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px}
+  .modal-f button{flex:1}
+  /* Responsive mobile */
+  @media (max-width:760px){
+    body{overflow:auto}
+    #app{flex-direction:column;height:auto;min-height:100vh}
+    #side{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--line);max-height:none}
+    #map{height:60vh;min-height:340px;flex:none}
+    .scroll{max-height:none;overflow:visible}
+    header h1{font-size:17px}
+    .sugg{right:42px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="side">
+    <header>
+      <h1>🏍️ Météo Trajet</h1>
+      <p>Villes ou fichier GPX · prévisions par point</p>
+    </header>
+    <div class="scroll">
+      <div class="grp">
+        <label>Villes du trajet</label>
+        <div id="cityList"></div>
+        <button class="btn-s" id="addCity" style="width:100%;margin-top:6px">+ Ajouter une ville</button>
+      </div>
+      <div class="sep">OU</div>
+      <div class="grp">
+        <label for="gpx" class="file-lbl" id="gpxLbl">📁 Importer un fichier GPX</label>
+        <input type="file" id="gpx" accept=".gpx">
+      </div>
+      <div class="grp">
+        <label>Jour de prévision</label>
+        <select id="day"></select>
+      </div>
+      <div class="grp">
+        <label>Heure de départ (estimation arrivée par point)</label>
+        <div class="row">
+          <input type="time" id="start" value="09:00">
+          <input type="number" id="speed" value="65" min="20" max="130" title="Vitesse moyenne km/h">
+        </div>
+      </div>
+      <div class="grp">
+        <button class="btn-p" id="go" style="width:100%">Afficher la météo</button>
+        <button class="btn-sum" id="summary" disabled>📋 Résumé du trajet</button>
+      </div>
+      <div class="grp" id="results"></div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <div class="modal-h">
+      <h2>📋 Résumé du trajet</h2>
+      <button class="x" id="modalClose">×</button>
+    </div>
+    <div class="modal-b"><pre id="summaryText"></pre></div>
+    <div class="modal-f">
+      <button class="btn-p" id="copySummary">Copier</button>
+      <button class="btn-s" id="dlSummary">Télécharger .txt</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([48.4, 2.4], 8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap', maxZoom:19
+}).addTo(map);
+
+let layers = [];
+let lastData = null; // données du dernier calcul (pour le résumé)
+function clearMap(){ layers.forEach(l=>map.removeLayer(l)); layers=[]; }
+
+// --- Jours de prévision (Open-Meteo = 16 j) ---
+const daySel = document.getElementById('day');
+const days = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+const months = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+for(let i=0;i<14;i++){
+  const d = new Date(); d.setDate(d.getDate()+i);
+  const iso = d.toISOString().slice(0,10);
+  const lbl = i===0?'Aujourd\'hui':i===1?'Demain':`${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
+  daySel.add(new Option(lbl, iso));
+}
+
+// --- Codes météo WMO ---
+const WMO = {
+  0:['☀️','Ciel dégagé'],1:['🌤️','Peu nuageux'],2:['⛅','Partiellement nuageux'],3:['☁️','Couvert'],
+  45:['🌫️','Brouillard'],48:['🌫️','Brouillard givrant'],
+  51:['🌦️','Bruine légère'],53:['🌦️','Bruine'],55:['🌧️','Bruine dense'],
+  56:['🌧️','Bruine verglaçante'],57:['🌧️','Bruine verglaçante'],
+  61:['🌦️','Pluie légère'],63:['🌧️','Pluie'],65:['🌧️','Forte pluie'],
+  66:['🌧️','Pluie verglaçante'],67:['🌧️','Pluie verglaçante'],
+  71:['🌨️','Neige légère'],73:['🌨️','Neige'],75:['❄️','Forte neige'],77:['🌨️','Grésil'],
+  80:['🌦️','Averses'],81:['🌧️','Averses'],82:['⛈️','Fortes averses'],
+  85:['🌨️','Averses de neige'],86:['❄️','Averses de neige'],
+  95:['⛈️','Orage'],96:['⛈️','Orage + grêle'],99:['⛈️','Orage violent']
+};
+const isRisk = c => c>=51;
+
+// --- Autocomplétion villes via API Adresse (BAN) ---
+const cityList = document.getElementById('cityList');
+let cityId = 0;
+
+function addCityRow(value=''){
+  const id = 'c'+(cityId++);
+  const row = document.createElement('div');
+  row.className = 'cityRow';
+  row.dataset.lat=''; row.dataset.lon=''; row.dataset.name='';
+  row.innerHTML = `<input type="text" id="${id}" placeholder="Ville..." autocomplete="off" value="${value}">
+    <button class="del" title="Supprimer">×</button>`;
+  cityList.appendChild(row);
+  const input = row.querySelector('input');
+  const del = row.querySelector('.del');
+  let sugg=null, timer=null, items=[], selIdx=-1;
+
+  function removeSuggBox(){ if(sugg){ sugg.remove(); sugg=null; } }
+  function closeSugg(){ removeSuggBox(); items=[]; selIdx=-1; }
+
+  input.addEventListener('input', ()=>{
+    row.dataset.lat=''; row.dataset.lon=''; input.classList.remove('ok');
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if(q.length<2){ closeSugg(); return; }
+    timer = setTimeout(async ()=>{
+      try{
+        const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&type=municipality&limit=6`;
+        const j = await (await fetch(url)).json();
+        items = j.features||[];
+        removeSuggBox();
+        selIdx=-1;
+        if(!items.length) return;
+        sugg = document.createElement('div'); sugg.className='sugg';
+        items.forEach((f,i)=>{
+          const d = document.createElement('div');
+          const p = f.properties;
+          d.textContent = `${p.city||p.name} (${p.postcode||p.context.split(',')[0]})`;
+          d.onclick = ()=>pick(i);
+          sugg.appendChild(d);
+        });
+        row.appendChild(sugg);
+      }catch(e){ closeSugg(); }
+    }, 250);
+  });
+
+  function pick(i){
+    const f = items[i]; const p = f.properties;
+    input.value = p.city||p.name;
+    row.dataset.lat = f.geometry.coordinates[1];
+    row.dataset.lon = f.geometry.coordinates[0];
+    row.dataset.name = p.city||p.name;
+    input.classList.add('ok');
+    closeSugg();
+  }
+
+  input.addEventListener('keydown', e=>{
+    if(!sugg) return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); selIdx=Math.min(selIdx+1,items.length-1); upd(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); selIdx=Math.max(selIdx-1,0); upd(); }
+    else if(e.key==='Enter'){ e.preventDefault(); if(selIdx>=0) pick(selIdx); else if(items.length) pick(0); }
+    else if(e.key==='Escape'){ closeSugg(); }
+  });
+  function upd(){ [...sugg.children].forEach((c,i)=>c.classList.toggle('sel',i===selIdx)); }
+
+  input.addEventListener('blur', ()=>setTimeout(closeSugg,150));
+  del.onclick = ()=>{ if(cityList.children.length>1) row.remove(); else { input.value=''; row.dataset.lat=''; input.classList.remove('ok'); } };
+}
+
+document.getElementById('addCity').onclick = ()=>addCityRow();
+// 2 champs au démarrage
+addCityRow(); addCityRow();
+
+// --- Géocodage Nominatim (fallback si champ sans coordonnées) ---
+async function geocode(name){
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=fr&q=${encodeURIComponent(name)}`;
+  const r = await fetch(url,{headers:{'Accept-Language':'fr'}});
+  const j = await r.json();
+  if(!j.length) throw new Error(`Ville introuvable : ${name}`);
+  return {lat:+j[0].lat, lon:+j[0].lon, name:j[0].display_name.split(',')[0]};
+}
+
+// --- Parse GPX : on échantillonne des points espacés ---
+function parseGPX(text){
+  const doc = new DOMParser().parseFromString(text,'application/xml');
+  let pts = [...doc.querySelectorAll('trkpt, rtept, wpt')].map(p=>({
+    lat:+p.getAttribute('lat'), lon:+p.getAttribute('lon')
+  })).filter(p=>!isNaN(p.lat));
+  if(!pts.length) throw new Error('Aucun point dans le GPX');
+  // échantillonnage : ~1 point tous les 25 km, max 12 points
+  const hav=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
+    const dLat=r(b.lat-a.lat),dLon=r(b.lon-a.lon);
+    const x=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
+    return R*2*Math.asin(Math.sqrt(x));};
+  const out=[pts[0]]; let acc=0;
+  for(let i=1;i<pts.length;i++){ acc+=hav(pts[i-1],pts[i]);
+    if(acc>=25){ out.push(pts[i]); acc=0; } }
+  if(out[out.length-1]!==pts[pts.length-1]) out.push(pts[pts.length-1]);
+  const step = Math.ceil(out.length/12);
+  const sampled = out.filter((_,i)=>i%step===0);
+  if(sampled[sampled.length-1]!==out[out.length-1]) sampled.push(out[out.length-1]);
+  return sampled.map((p,i)=>({...p, name:i===0?'Départ':i===sampled.length-1?'Arrivée':`Point ${i}`}));
+}
+
+// --- Récupère la géométrie de la route OSRM (liste de [lat,lon]) ---
+async function fetchRouteGeometry(waypoints){
+  if(waypoints.length<2) return null;
+  try{
+    const coords = waypoints.map(p=>`${p.lon},${p.lat}`).join(';');
+    const url=`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+    const j = await (await fetch(url)).json();
+    if(j.routes && j.routes[0]) return j.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);
+  }catch(e){}
+  return null;
+}
+
+// --- Insère des points météo tous les ~stepKm le long de la route ---
+// Garde les villes d'origine à leur place, ajoute des intermédiaires entre elles.
+function densifyAlongRoute(waypoints, routeLL, stepKm=35){
+  if(!routeLL || routeLL.length<2) return waypoints;
+  const hav=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
+    const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]);
+    const x=Math.sin(dLat/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dLon/2)**2;
+    return R*2*Math.asin(Math.sqrt(x));};
+  // distance cumulée le long de la route pour chaque sommet de la polyline
+  const cum=[0];
+  for(let i=1;i<routeLL.length;i++) cum.push(cum[i-1]+hav(routeLL[i-1],routeLL[i]));
+  const total=cum[cum.length-1];
+  // interpole une position [lat,lon] à une distance d le long de la route
+  const at=(d)=>{
+    let i=1; while(i<cum.length && cum[i]<d) i++;
+    if(i>=cum.length) return routeLL[routeLL.length-1];
+    const t=(d-cum[i-1])/(cum[i]-cum[i-1]||1);
+    return [routeLL[i-1][0]+(routeLL[i][0]-routeLL[i-1][0])*t,
+            routeLL[i-1][1]+(routeLL[i][1]-routeLL[i-1][1])*t];
+  };
+  // trouve la distance-route la plus proche d'une ville (pour l'ancrer)
+  const nearest=(pt)=>{
+    let best=0,bd=1e9;
+    for(let i=0;i<routeLL.length;i++){
+      const dd=hav([pt.lat,pt.lon],routeLL[i]);
+      if(dd<bd){bd=dd;best=cum[i];}
+    }
+    return best;
+  };
+  const anchors = waypoints.map(w=>({...w, d:nearest(w)}));
+  const out=[];
+  for(let k=0;k<anchors.length-1;k++){
+    out.push({...anchors[k], routeKm:anchors[k].d}); // ville de départ du segment
+    const d0=anchors[k].d, d1=anchors[k+1].d, seg=d1-d0;
+    const n=Math.floor(seg/stepKm); // nb d'intermédiaires
+    for(let m=1;m<=n;m++){
+      const d=d0+(seg*m)/(n+1);
+      const ll=at(d);
+      out.push({lat:ll[0], lon:ll[1], name:`${Math.round(d)} km`, mid:true, routeKm:d});
+    }
+  }
+  const last=anchors[anchors.length-1];
+  out.push({...last, routeKm:last.d}); // dernière ville
+  return out;
+}
+
+// --- Prévisions Open-Meteo ---
+async function forecast(pts, iso){
+  const dist=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
+    const dLat=r(b.lat-a.lat),dLon=r(b.lon-a.lon);
+    const x=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
+    return R*2*Math.asin(Math.sqrt(x));};
+  const speed = +document.getElementById('speed').value || 65;
+  const [sh,sm] = document.getElementById('start').value.split(':').map(Number);
+  let cumKm=0, out=[];
+  for(let i=0;i<pts.length;i++){
+    if(i>0) cumKm += dist(pts[i-1],pts[i]);
+    // distance réelle route si dispo (points densifiés), sinon vol d'oiseau cumulé
+    const km = (pts[i].routeKm!=null) ? pts[i].routeKm : cumKm;
+    const mins = sh*60+sm + (km/speed)*60;
+    const hour = Math.min(23, Math.round(mins/60));
+    const url=`https://api.open-meteo.com/v1/forecast?latitude=${pts[i].lat}&longitude=${pts[i].lon}`
+      +`&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m`
+      +`&start_date=${iso}&end_date=${iso}&timezone=Europe%2FParis`;
+    const j = await (await fetch(url)).json();
+    const idx = Math.min(hour, j.hourly.time.length-1);
+    out.push({...pts[i],
+      km: Math.round(km),
+      eta: `${String(Math.floor(mins/60)%24).padStart(2,'0')}h${String(Math.round(mins%60)).padStart(2,'0')}`,
+      temp: Math.round(j.hourly.temperature_2m[idx]),
+      pop: j.hourly.precipitation_probability[idx],
+      wind: Math.round(j.hourly.wind_speed_10m[idx]),
+      code: j.hourly.weather_code[idx]
+    });
+  }
+  return out;
+}
+
+// --- Rendu ---
+function render(data, routeLL){
+  clearMap();
+  const res = document.getElementById('results');
+  res.innerHTML='';
+  const latlngs=[];
+  data.forEach(d=>{
+    latlngs.push([d.lat,d.lon]);
+    const [ic,desc] = WMO[d.code]||['❓','?'];
+    const risk = isRisk(d.code) || d.pop>=50;
+    const icon = L.divIcon({
+      className:'', iconSize:null, iconAnchor:[0,0],
+      html:`<div class="wsign ${risk?'risk':''} ${d.mid?'mid':''}">
+        <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
+        <div class="wsub"><span class="${d.pop>=50?'r':''}">💧${d.pop}%</span><span>💨${d.wind}</span></div>
+      </div>`
+    });
+    const mk = L.marker([d.lat,d.lon],{icon, riseOnHover:true}).addTo(map);
+    mk.bindPopup(`<div class="pop-t">${d.name} · ${d.eta}</div>
+      <div class="pop-w"><span class="e">${ic}</span><span><b>${d.temp}°C</b> — ${desc}<br>
+      💧 ${d.pop}% · 💨 ${d.wind} km/h · ${d.km} km</span></div>`);
+    layers.push(mk);
+    const card=document.createElement('div');
+    card.className='pt'+(d.mid?' pt-mid':'');
+    card.innerHTML=`<div class="pt-h"><span>${d.name}</span><span class="t">${d.eta} · ${d.km} km</span></div>
+      <div class="pt-b"><span class="ic">${ic}</span>
+      <div><span class="tp">${d.temp}°C</span>
+      <div class="ds">${desc}</div>
+      <div class="ds ${d.pop>=50?'rain':''}">💧 ${d.pop}%${d.pop>=50?' ⚠️':''} · 💨 ${d.wind} km/h</div></div></div>`;
+    card.onclick=()=>{ map.setView([d.lat,d.lon],11); mk.openPopup(); };
+    res.appendChild(card);
+  });
+  // trace la route fournie (ou ligne droite entre points en fallback)
+  const line=L.polyline(routeLL||latlngs,{color:'#ff7a1a',weight:4,opacity:.75}).addTo(map);
+  layers.push(line);
+  map.fitBounds(line.getBounds().pad(0.15));
+  // mémorise pour le résumé
+  lastData = data;
+  document.getElementById('summary').disabled = false;
+}
+
+// --- Résumé texte du trajet ---
+function buildSummary(data){
+  const dayLbl = daySel.options[daySel.selectedIndex].text;
+  const start = document.getElementById('start').value;
+  const speed = document.getElementById('speed').value;
+  const total = data.length ? data[data.length-1].km : 0;
+  let s = `🏍️  RÉSUMÉ DU TRAJET\n`;
+  s += `${'='.repeat(40)}\n`;
+  s += `Jour        : ${dayLbl}\n`;
+  s += `Départ      : ${start}  ·  ${speed} km/h moyenne\n`;
+  s += `Distance    : ${total} km  ·  ${data.length} points météo\n`;
+  // alertes
+  const risky = data.filter(d=>isRisk(d.code) || d.pop>=50);
+  if(risky.length){
+    s += `\n⚠️  VIGILANCE (${risky.length} point${risky.length>1?'s':''})\n`;
+    risky.forEach(d=>{
+      const desc = (WMO[d.code]||['','?'])[1];
+      s += `   • ${d.name} (${d.eta}) — ${desc}, pluie ${d.pop}%\n`;
+    });
+  }else{
+    s += `\n✅  Aucune pluie notable prévue sur le trajet.\n`;
+  }
+  s += `\n${'-'.repeat(40)}\n`;
+  s += `DÉTAIL PAR POINT\n`;
+  s += `${'-'.repeat(40)}\n`;
+  data.forEach(d=>{
+    const desc = (WMO[d.code]||['','?'])[1];
+    const tag = d.mid ? '' : '📍';
+    s += `\n${tag} ${d.name}  ·  ${d.eta}  ·  ${d.km} km\n`;
+    s += `   ${desc}\n`;
+    s += `   🌡️ ${d.temp}°C   💧 ${d.pop}%   💨 ${d.wind} km/h\n`;
+  });
+  s += `\n${'='.repeat(40)}\n`;
+  s += `Généré le ${new Date().toLocaleString('fr-FR')}\n`;
+  return s;
+}
+
+document.getElementById('summary').addEventListener('click', ()=>{
+  if(!lastData) return;
+  document.getElementById('summaryText').textContent = buildSummary(lastData);
+  document.getElementById('modalBg').classList.add('show');
+});
+document.getElementById('modalClose').addEventListener('click', ()=>document.getElementById('modalBg').classList.remove('show'));
+document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') e.currentTarget.classList.remove('show'); });
+document.getElementById('copySummary').addEventListener('click', async e=>{
+  try{ await navigator.clipboard.writeText(document.getElementById('summaryText').textContent);
+    const b=e.target; const t=b.textContent; b.textContent='✓ Copié !'; setTimeout(()=>b.textContent=t,1500);
+  }catch(err){ alert('Copie impossible, sélectionne le texte manuellement.'); }
+});
+document.getElementById('dlSummary').addEventListener('click', ()=>{
+  const txt = document.getElementById('summaryText').textContent;
+  const blob = new Blob([txt],{type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `trajet-meteo-${daySel.value}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// --- Événements ---
+let gpxPoints=null;
+document.getElementById('gpx').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  document.getElementById('gpxLbl').textContent='📁 '+f.name;
+  const rd=new FileReader();
+  rd.onload=ev=>{ try{ gpxPoints=parseGPX(ev.target.result); }
+    catch(err){ alert(err.message); gpxPoints=null; } };
+  rd.readAsText(f);
+});
+document.getElementById('cityList').addEventListener('input',()=>{ gpxPoints=null;
+  document.getElementById('gpx').value=''; document.getElementById('gpxLbl').textContent='📁 Importer un fichier GPX'; });
+
+document.getElementById('go').addEventListener('click', async ()=>{
+  const res=document.getElementById('results');
+  const iso=daySel.value;
+  res.innerHTML='<div class="spin"></div>';
+  document.getElementById('summary').disabled = true;
+  try{
+    let pts, routeLL=null;
+    if(gpxPoints){
+      pts=gpxPoints;
+      // route qui suit les points du GPX
+      routeLL = await fetchRouteGeometry(pts);
+    }else{
+      const rows = [...cityList.querySelectorAll('.cityRow')];
+      let waypoints=[];
+      for(const row of rows){
+        const input = row.querySelector('input');
+        const name = input.value.trim();
+        if(!name) continue;
+        if(row.dataset.lat){
+          waypoints.push({lat:+row.dataset.lat, lon:+row.dataset.lon, name:row.dataset.name||name});
+        }else{
+          waypoints.push(await geocode(name));
+          await new Promise(r=>setTimeout(r,900));
+        }
+      }
+      if(waypoints.length<1){ res.innerHTML='<div class="msg">Ajoute au moins une ville ou un GPX.</div>'; return; }
+      // route réelle puis points météo intermédiaires tous les ~35 km
+      routeLL = await fetchRouteGeometry(waypoints);
+      pts = densifyAlongRoute(waypoints, routeLL, 35);
+    }
+    const data=await forecast(pts, iso);
+    render(data, routeLL);
+  }catch(err){ res.innerHTML=`<div class="msg">❌ ${err.message}</div>`; }
+});
+</script>
+</body>
+</html>
