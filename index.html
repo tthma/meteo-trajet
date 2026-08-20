@@ -65,25 +65,34 @@
   .msg{font-size:13px;color:var(--mut);text-align:center;padding:20px}
   .spin{border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;width:22px;height:22px;animation:s 1s linear infinite;margin:20px auto}
   @keyframes s{to{transform:rotate(360deg)}}
+  /* wrapper qui centre tout sur le point géographique */
+  .wmarker{position:absolute;transform:translate(-50%,-50%)}
   .wsign{background:var(--panel);border:2px solid #4aa3ff;border-radius:10px;padding:3px 7px;
-    display:flex;flex-direction:column;align-items:center;gap:1px;box-shadow:0 3px 8px rgba(0,0,0,.4);white-space:nowrap;font-weight:700;
-    position:absolute;transform:translate(-50%,-100%);margin-top:-6px}
+    display:flex;flex-direction:column;align-items:center;gap:1px;box-shadow:0 3px 8px rgba(0,0,0,.4);white-space:nowrap;font-weight:700;position:relative}
   .wsign .wtop{display:flex;align-items:center;gap:3px}
   .wsign.risk{border-color:var(--acc)}
   .wsign .we{font-size:17px;line-height:1}
   .wsign .wt{font-size:13px;color:var(--txt)}
   .wsign .wsub{font-size:10px;font-weight:600;color:var(--mut);line-height:1;display:flex;gap:5px}
   .wsign .wsub .r{color:#4aa3ff}
-  .wsign::after{content:"";position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);
-    border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid #4aa3ff}
-  .wsign.risk::after{border-top-color:var(--acc)}
+  .wsign .wsub .wind-g{color:#5dcaa5}
+  .wsign .wsub .wind-o{color:#ffb066}
+  .wsign .wsub .wind-r{color:#ff6b6b}
+  /* flèche vent : positionnée au centre du panneau, poussée vers l'extérieur puis tournée.
+     --a = angle (0 = vers le haut/Nord). La rotation place la flèche autour du panneau
+     ET l'oriente vers l'extérieur en même temps. */
+  .warrow{position:absolute;left:50%;top:50%;width:0;height:0;
+    transform:translate(-50%,-50%) rotate(var(--a,180deg)) translateY(calc(-1 * var(--r,42px)));
+    pointer-events:none}
+  .warrow::before{content:"";position:absolute;left:-7px;top:-6px;
+    border-left:7px solid transparent;border-right:7px solid transparent;
+    border-bottom:12px solid var(--wc,#5dcaa5);
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+  .wsign.mid ~ .warrow, .wmarker.mid .warrow{--r:36px}
   .wsign.mid{border-color:#5a6b7d;opacity:.94;padding:2px 6px}
   .wsign.mid .we{font-size:15px}
   .wsign.mid .wt{font-size:12px}
   .wsign.mid .wsub{font-size:9px}
-  .wsign.mid::after{border-top-color:#5a6b7d}
-  .wsign.mid.risk{border-color:var(--acc)}
-  .wsign.mid.risk::after{border-top-color:var(--acc)}
   .pt-mid{opacity:.85;border-style:dashed}
   .pt-mid .pt-h span:first-child{color:var(--mut);font-weight:500}
   .leaflet-popup-content{font-family:inherit;font-size:13px}
@@ -456,7 +465,7 @@ async function forecast(pts, iso){
     const mins = sh*60+sm + (km/speed)*60;
     const hour = Math.min(23, Math.round(mins/60));
     const url=`https://api.open-meteo.com/v1/forecast?latitude=${pts[i].lat}&longitude=${pts[i].lon}`
-      +`&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m`
+      +`&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_direction_10m`
       +`&start_date=${iso}&end_date=${iso}&timezone=Europe%2FParis`;
     const j = await (await fetch(url)).json();
     const idx = Math.min(hour, j.hourly.time.length-1);
@@ -466,10 +475,23 @@ async function forecast(pts, iso){
       temp: Math.round(j.hourly.temperature_2m[idx]),
       pop: j.hourly.precipitation_probability[idx],
       wind: Math.round(j.hourly.wind_speed_10m[idx]),
+      windDir: j.hourly.wind_direction_10m[idx], // d'où vient le vent, en degrés
       code: j.hourly.weather_code[idx]
     });
   }
   return out;
+}
+
+// --- Force du vent → couleur + classe (seuils moto) ---
+function windStyle(kmh){
+  if(kmh<20) return {color:'#5dcaa5', cls:'wind-g'};   // faible : vert
+  if(kmh<=40) return {color:'#ff7a1a', cls:'wind-o'};  // moyen/travers sensible : orange
+  return {color:'#ff6b6b', cls:'wind-r'};              // fort : rouge
+}
+// Direction cardinale depuis les degrés (d'où vient le vent)
+function windCardinal(deg){
+  const dirs=['N','NE','E','SE','S','SO','O','NO'];
+  return dirs[Math.round(deg/45)%8];
 }
 
 // --- Rendu ---
@@ -482,17 +504,29 @@ function render(data, routeLL){
     latlngs.push([d.lat,d.lon]);
     const [ic,desc] = WMO[d.code]||['❓','?'];
     const risk = isRisk(d.code) || d.pop>=50;
+    const ws = windStyle(d.wind);
+    // direction où VA le vent = d'où il vient + 180°. La flèche (pointe vers le haut à 0°)
+    // tourne de cet angle : elle se place autour du panneau ET pointe vers l'extérieur.
+    const goDir = ((d.windDir||0) + 180) % 360;
+    const showArrow = d.wind>=5; // en dessous de 5 km/h, vent négligeable, pas de flèche
+    const arrowHtml = showArrow
+      ? `<div class="warrow" style="--a:${goDir}deg; --wc:${ws.color}"></div>`
+      : '';
     const icon = L.divIcon({
       className:'', iconSize:null, iconAnchor:[0,0],
-      html:`<div class="wsign ${risk?'risk':''} ${d.mid?'mid':''}">
-        <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
-        <div class="wsub"><span class="${d.pop>=50?'r':''}">💧${d.pop}%</span><span>💨${d.wind}</span></div>
+      html:`<div class="wmarker ${d.mid?'mid':''}">
+        <div class="wsign ${risk?'risk':''} ${d.mid?'mid':''}">
+          <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
+          <div class="wsub"><span class="${d.pop>=50?'r':''}">💧${d.pop}%</span><span class="${ws.cls}">💨${d.wind}</span></div>
+        </div>
+        ${arrowHtml}
       </div>`
     });
     const mk = L.marker([d.lat,d.lon],{icon, riseOnHover:true}).addTo(map);
+    const card2Dir = showArrow ? ` ${windCardinal(d.windDir)}` : '';
     mk.bindPopup(`<div class="pop-t">${d.name} · ${d.eta}</div>
       <div class="pop-w"><span class="e">${ic}</span><span><b>${d.temp}°C</b> — ${desc}<br>
-      💧 ${d.pop}% · 💨 ${d.wind} km/h · ${d.km} km</span></div>`);
+      💧 ${d.pop}% · 💨 ${d.wind} km/h${showArrow?` (de ${windCardinal(d.windDir)})`:''} · ${d.km} km</span></div>`);
     layers.push(mk);
     const card=document.createElement('div');
     card.className='pt'+(d.mid?' pt-mid':'');
@@ -500,7 +534,7 @@ function render(data, routeLL){
       <div class="pt-b"><span class="ic">${ic}</span>
       <div><span class="tp">${d.temp}°C</span>
       <div class="ds">${desc}</div>
-      <div class="ds ${d.pop>=50?'rain':''}">💧 ${d.pop}%${d.pop>=50?' ⚠️':''} · 💨 ${d.wind} km/h</div></div></div>`;
+      <div class="ds ${d.pop>=50?'rain':''}">💧 ${d.pop}%${d.pop>=50?' ⚠️':''} · 💨 ${d.wind} km/h${showArrow?` (${windCardinal(d.windDir)})`:''}</div></div></div>`;
     card.onclick=()=>{ map.setView([d.lat,d.lon],11); mk.openPopup(); };
     res.appendChild(card);
   });
@@ -511,6 +545,54 @@ function render(data, routeLL){
   // mémorise pour le résumé
   lastData = data;
   document.getElementById('summary').disabled = false;
+}
+
+// --- Score de confort moto (0-100) ---
+// Combine confort thermique, pluie et vent (relatif à la route si cap connu).
+function comfortScore(data){
+  if(!data.length) return null;
+  const bearing=(a,b)=>{ // cap de a vers b en degrés
+    const r=x=>x*Math.PI/180, dg=x=>x*180/Math.PI;
+    const y=Math.sin(r(b.lon-a.lon))*Math.cos(r(b.lat));
+    const x=Math.cos(r(a.lat))*Math.sin(r(b.lat))-Math.sin(r(a.lat))*Math.cos(r(b.lat))*Math.cos(r(b.lon-a.lon));
+    return (dg(Math.atan2(y,x))+360)%360;
+  };
+  let totalPenalty=0;
+  data.forEach((d,i)=>{
+    let p=0;
+    // température : idéal 15-25°C, pénalité croissante hors de cette plage
+    if(d.temp<15) p += (15-d.temp)*1.5;
+    else if(d.temp>28) p += (d.temp-28)*1.5;
+    // pluie : proportionnelle à la probabilité
+    p += d.pop*0.35;
+    // vent : dépend de la force et de l'angle relatif à la route
+    if(d.wind>=10){
+      // cap de roulage vers le point suivant (ou depuis le précédent au dernier point)
+      let cap=null;
+      if(i<data.length-1) cap=bearing(data[i], data[i+1]);
+      else if(i>0) cap=bearing(data[i-1], data[i]);
+      let factor=0.5; // par défaut si cap inconnu
+      if(cap!=null && d.windDir!=null){
+        // angle entre la direction D'OÙ vient le vent et le cap de roulage
+        let rel=Math.abs(((d.windDir - cap + 540)%360)-180); // 0=de dos, 180=de face
+        // de dos (rel petit) = peu pénalisant ; de face (rel~180) ou travers (rel~90) = plus
+        if(rel<45) factor=0.2;        // vent portant
+        else if(rel<135) factor=1.0;  // travers : le pire en 125
+        else factor=0.8;              // de face
+      }
+      p += (d.wind-10)*factor*0.8;
+    }
+    totalPenalty += p;
+  });
+  const avg = totalPenalty/data.length;
+  const score = Math.max(0, Math.min(100, Math.round(100-avg)));
+  let mention;
+  if(score>=85) mention='Excellent — conditions idéales';
+  else if(score>=70) mention='Bon — sortie agréable';
+  else if(score>=50) mention='Moyen — quelques désagréments';
+  else if(score>=30) mention='Difficile — vent ou pluie marqués';
+  else mention='Défavorable — envisager un autre jour';
+  return {score, mention};
 }
 
 // --- Résumé texte du trajet ---
@@ -524,6 +606,14 @@ function buildSummary(data){
   s += `Jour        : ${dayLbl}\n`;
   s += `Départ      : ${start}  ·  ${speed} km/h moyenne\n`;
   s += `Distance    : ${total} km  ·  ${data.length} points météo\n`;
+  // score de confort moto
+  const cs = comfortScore(data);
+  if(cs){
+    const bar = '█'.repeat(Math.round(cs.score/10)) + '░'.repeat(10-Math.round(cs.score/10));
+    s += `\n🏍️  CONFORT MOTO : ${cs.score}/100\n`;
+    s += `   ${bar}\n`;
+    s += `   ${cs.mention}\n`;
+  }
   // alertes
   const risky = data.filter(d=>isRisk(d.code) || d.pop>=50);
   if(risky.length){
@@ -543,7 +633,7 @@ function buildSummary(data){
     const tag = d.mid ? '' : '📍';
     s += `\n${tag} ${d.name}  ·  ${d.eta}  ·  ${d.km} km\n`;
     s += `   ${desc}\n`;
-    s += `   🌡️ ${d.temp}°C   💧 ${d.pop}%   💨 ${d.wind} km/h\n`;
+    s += `   🌡️ ${d.temp}°C   💧 ${d.pop}%   💨 ${d.wind} km/h${d.windDir!=null&&d.wind>=5?` (de ${windCardinal(d.windDir)})`:''}\n`;
   });
   s += `\n${'='.repeat(40)}\n`;
   s += `Généré le ${new Date().toLocaleString('fr-FR')}\n`;
