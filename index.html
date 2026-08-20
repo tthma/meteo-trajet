@@ -82,13 +82,13 @@
      --a = angle (0 = vers le haut/Nord). La rotation place la flèche autour du panneau
      ET l'oriente vers l'extérieur en même temps. */
   .warrow{position:absolute;left:50%;top:50%;width:0;height:0;
-    transform:translate(-50%,-50%) rotate(var(--a,180deg)) translateY(calc(-1 * var(--r,42px)));
+    transform:translate(-50%,-50%) rotate(var(--a,180deg)) translateY(calc(-1 * var(--r,58px)));
     pointer-events:none}
-  .warrow::before{content:"";position:absolute;left:-7px;top:-6px;
-    border-left:7px solid transparent;border-right:7px solid transparent;
-    border-bottom:12px solid var(--wc,#5dcaa5);
-    filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
-  .wsign.mid ~ .warrow, .wmarker.mid .warrow{--r:36px}
+  .warrow svg{position:absolute;left:-11px;top:-14px;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+  .warrow path{fill:var(--wc,#5dcaa5);stroke:#fff;stroke-width:1.5;stroke-linejoin:round}
+  .wsign.mid ~ .warrow, .wmarker.mid .warrow{--r:50px}
+  .wsign.mid ~ .warrow svg, .wmarker.mid .warrow svg{transform:scale(.85)}
   .wsign.mid{border-color:#5a6b7d;opacity:.94;padding:2px 6px}
   .wsign.mid .we{font-size:15px}
   .wsign.mid .wt{font-size:12px}
@@ -510,7 +510,7 @@ function render(data, routeLL){
     const goDir = ((d.windDir||0) + 180) % 360;
     const showArrow = d.wind>=5; // en dessous de 5 km/h, vent négligeable, pas de flèche
     const arrowHtml = showArrow
-      ? `<div class="warrow" style="--a:${goDir}deg; --wc:${ws.color}"></div>`
+      ? `<div class="warrow" style="--a:${goDir}deg; --wc:${ws.color}"><svg width="22" height="28" viewBox="0 0 22 28"><path d="M11 0 L20 13 L14 13 L14 28 L8 28 L8 13 L2 13 Z"/></svg></div>`
       : '';
     const icon = L.divIcon({
       className:'', iconSize:null, iconAnchor:[0,0],
