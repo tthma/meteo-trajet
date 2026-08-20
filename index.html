@@ -65,34 +65,32 @@
   .msg{font-size:13px;color:var(--mut);text-align:center;padding:20px}
   .spin{border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;width:22px;height:22px;animation:s 1s linear infinite;margin:20px auto}
   @keyframes s{to{transform:rotate(360deg)}}
-  /* wrapper qui centre tout sur le point géographique */
+  /* wrapper qui centre le panneau sur le point géographique */
   .wmarker{position:absolute;transform:translate(-50%,-50%)}
-  .wsign{background:var(--panel);border:2px solid #4aa3ff;border-radius:10px;padding:3px 7px;
-    display:flex;flex-direction:column;align-items:center;gap:1px;box-shadow:0 3px 8px rgba(0,0,0,.4);white-space:nowrap;font-weight:700;position:relative}
-  .wsign .wtop{display:flex;align-items:center;gap:3px}
+  .wsign{background:var(--panel);border:2px solid #4aa3ff;border-radius:11px;
+    display:flex;align-items:stretch;box-shadow:0 3px 8px rgba(0,0,0,.45);white-space:nowrap;font-weight:700;overflow:hidden}
   .wsign.risk{border-color:var(--acc)}
+  .wsign .wleft{display:flex;flex-direction:column;gap:2px;padding:4px 8px;justify-content:center}
+  .wsign .wtop{display:flex;align-items:center;gap:4px}
   .wsign .we{font-size:17px;line-height:1}
-  .wsign .wt{font-size:13px;color:var(--txt)}
-  .wsign .wsub{font-size:10px;font-weight:600;color:var(--mut);line-height:1;display:flex;gap:5px}
+  .wsign .wt{font-size:14px;color:var(--txt)}
+  .wsign .wsub{font-size:10px;font-weight:600;color:var(--mut);line-height:1;display:flex;gap:6px}
   .wsign .wsub .r{color:#4aa3ff}
   .wsign .wsub .wind-g{color:#5dcaa5}
   .wsign .wsub .wind-o{color:#ffb066}
   .wsign .wsub .wind-r{color:#ff6b6b}
-  /* flèche vent : positionnée au centre du panneau, poussée vers l'extérieur puis tournée.
-     --a = angle (0 = vers le haut/Nord). La rotation place la flèche autour du panneau
-     ET l'oriente vers l'extérieur en même temps. */
-  .warrow{position:absolute;left:50%;top:50%;width:0;height:0;
-    transform:translate(-50%,-50%) rotate(var(--a,180deg)) translateY(calc(-1 * var(--r,58px)));
-    pointer-events:none}
-  .warrow svg{position:absolute;left:-11px;top:-14px;
-    filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
-  .warrow path{fill:var(--wc,#5dcaa5);stroke:#fff;stroke-width:1.5;stroke-linejoin:round}
-  .wsign.mid ~ .warrow, .wmarker.mid .warrow{--r:50px}
-  .wsign.mid ~ .warrow svg, .wmarker.mid .warrow svg{transform:scale(.85)}
-  .wsign.mid{border-color:#5a6b7d;opacity:.94;padding:2px 6px}
+  /* zone vent dédiée à droite : flèche orientée + direction cardinale */
+  .wsign .wwind{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+    padding:0 7px;border-left:1px solid #3a4a5a;background:rgba(255,255,255,.03)}
+  .wsign .wwind .wa{width:17px;height:17px;display:block}
+  .wsign .wwind .wc{font-size:9px;font-weight:700;color:#cdd8e2;line-height:1}
+  /* variante compacte pour les points intermédiaires */
+  .wsign.mid{border-color:#5a6b7d;opacity:.95}
   .wsign.mid .we{font-size:15px}
   .wsign.mid .wt{font-size:12px}
   .wsign.mid .wsub{font-size:9px}
+  .wsign.mid .wleft{padding:3px 6px}
+  .wsign.mid .wwind .wa{width:15px;height:15px}
   .pt-mid{opacity:.85;border-style:dashed}
   .pt-mid .pt-h span:first-child{color:var(--mut);font-weight:500}
   .leaflet-popup-content{font-family:inherit;font-size:13px}
@@ -506,24 +504,29 @@ function render(data, routeLL){
     const risk = isRisk(d.code) || d.pop>=50;
     const ws = windStyle(d.wind);
     // direction où VA le vent = d'où il vient + 180°. La flèche (pointe vers le haut à 0°)
-    // tourne de cet angle : elle se place autour du panneau ET pointe vers l'extérieur.
+    // tourne de cet angle pour indiquer où va le vent.
     const goDir = ((d.windDir||0) + 180) % 360;
-    const showArrow = d.wind>=5; // en dessous de 5 km/h, vent négligeable, pas de flèche
-    const arrowHtml = showArrow
-      ? `<div class="warrow" style="--a:${goDir}deg; --wc:${ws.color}"><svg width="22" height="28" viewBox="0 0 22 28"><path d="M11 0 L20 13 L14 13 L14 28 L8 28 L8 13 L2 13 Z"/></svg></div>`
+    const showWind = d.wind>=5; // sous 5 km/h : vent négligeable, on masque la zone vent
+    const windZone = showWind
+      ? `<div class="wwind">
+          <svg class="wa" viewBox="0 0 22 28" style="transform:rotate(${goDir}deg)"><path d="M11 0 L20 13 L14 13 L14 28 L8 28 L8 13 L2 13 Z" fill="${ws.color}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span class="wc">${windCardinal(d.windDir)}</span>
+        </div>`
       : '';
     const icon = L.divIcon({
       className:'', iconSize:null, iconAnchor:[0,0],
       html:`<div class="wmarker ${d.mid?'mid':''}">
         <div class="wsign ${risk?'risk':''} ${d.mid?'mid':''}">
-          <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
-          <div class="wsub"><span class="${d.pop>=50?'r':''}">💧${d.pop}%</span><span class="${ws.cls}">💨${d.wind}</span></div>
+          <div class="wleft">
+            <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
+            <div class="wsub"><span class="${d.pop>=50?'r':''}">💧${d.pop}%</span><span class="${ws.cls}">💨${d.wind}</span></div>
+          </div>
+          ${windZone}
         </div>
-        ${arrowHtml}
       </div>`
     });
     const mk = L.marker([d.lat,d.lon],{icon, riseOnHover:true}).addTo(map);
-    const card2Dir = showArrow ? ` ${windCardinal(d.windDir)}` : '';
+    const showArrow = showWind;
     mk.bindPopup(`<div class="pop-t">${d.name} · ${d.eta}</div>
       <div class="pop-w"><span class="e">${ic}</span><span><b>${d.temp}°C</b> — ${desc}<br>
       💧 ${d.pop}% · 💨 ${d.wind} km/h${showArrow?` (de ${windCardinal(d.windDir)})`:''} · ${d.km} km</span></div>`);
