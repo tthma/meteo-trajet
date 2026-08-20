@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Météo Trajet">
+<meta name="author" content="MG — https://github.com/tthma">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#ff7a1a">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -97,6 +98,9 @@
   .pop-t{font-weight:700;margin-bottom:2px}
   .pop-w{display:flex;align-items:center;gap:8px}
   .pop-w .e{font-size:22px}
+  .credit{text-align:center;font-size:11px;color:var(--mut);padding:14px 0 6px;margin-top:8px;border-top:1px solid var(--line)}
+  .credit a{color:var(--acc);text-decoration:none;font-weight:600}
+  .credit a:hover{text-decoration:underline}
   /* Bouton résumé + modale */
   .btn-sum{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);margin-top:8px}
   .btn-sum:hover{border-color:var(--acc);color:var(--acc)}
@@ -184,6 +188,7 @@
         <button class="btn-sum" id="summary" disabled>📋 Résumé du trajet</button>
       </div>
       <div class="grp" id="results"></div>
+      <div class="credit">Fait par <a href="https://github.com/tthma" target="_blank" rel="noopener">MG</a></div>
     </div>
   </div>
   <div id="map"></div>
