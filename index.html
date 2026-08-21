@@ -395,6 +395,22 @@ function parseGPX(text){
 }
 
 // --- Récupère la géométrie de la route OSRM (liste de [lat,lon]) ---
+// --- Durée OSRM pour une trace GPX (échantillonnée en waypoints) ---
+async function fetchOsrmDuration(trackLL){
+  if(!trackLL || trackLL.length<2) return null;
+  const maxWp = 24;
+  const step = Math.max(1, Math.ceil(trackLL.length/maxWp));
+  const wp = trackLL.filter((_,i)=>i%step===0);
+  if(wp[wp.length-1]!==trackLL[trackLL.length-1]) wp.push(trackLL[trackLL.length-1]);
+  try{
+    const coords = wp.map(p=>`${p[1]},${p[0]}`).join(';');
+    const url=`https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`;
+    const j = await (await fetch(url)).json();
+    if(j.routes && j.routes[0]) return j.routes[0].duration; // secondes
+  }catch(e){}
+  return null;
+}
+
 async function fetchRouteGeometry(waypoints){
   if(waypoints.length<2) return null;
   try{
@@ -453,12 +469,12 @@ function densifyAlongRoute(waypoints, routeLL, stepKm=35){
 }
 
 // --- Prévisions Open-Meteo ---
-async function forecast(pts, iso){
+async function forecast(pts, iso, effSpeed){
   const dist=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
     const dLat=r(b.lat-a.lat),dLon=r(b.lon-a.lon);
     const x=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
     return R*2*Math.asin(Math.sqrt(x));};
-  const speed = +document.getElementById('speed').value || 65;
+  const speed = effSpeed || (+document.getElementById('speed').value) || 65;
   const [sh,sm] = document.getElementById('start').value.split(':').map(Number);
   let cumKm=0, out=[];
   for(let i=0;i<pts.length;i++){
@@ -689,11 +705,15 @@ document.getElementById('go').addEventListener('click', async ()=>{
   res.innerHTML='<div class="spin"></div>';
   document.getElementById('summary').disabled = true;
   try{
-    let pts, routeLL=null;
+    let pts, routeLL=null, effSpeed=null;
     if(gpxData){
       // GPX : on suit EXACTEMENT la trace du fichier, pas de recalcul OSRM
       pts = gpxData.weatherPts;
       routeLL = gpxData.trackLL;
+      // durée estimée par OSRM le long de la trace → vitesse effective (bien plus juste
+      // qu'une vitesse moyenne fixe, car OSRM tient compte des types de routes)
+      const durSec = await fetchOsrmDuration(gpxData.trackLL);
+      if(durSec && gpxData.totalKm>0) effSpeed = gpxData.totalKm / (durSec/3600);
     }else{
       const rows = [...cityList.querySelectorAll('.cityRow')];
       let waypoints=[];
@@ -713,8 +733,16 @@ document.getElementById('go').addEventListener('click', async ()=>{
       routeLL = await fetchRouteGeometry(waypoints);
       pts = densifyAlongRoute(waypoints, routeLL, 35);
     }
-    const data=await forecast(pts, iso);
+    const data=await forecast(pts, iso, effSpeed);
     render(data, routeLL);
+    if(gpxData){
+      const info=document.createElement('div');
+      info.style.cssText='font-size:11px;color:var(--mut);font-weight:600;text-align:center;padding:8px 0';
+      info.textContent = effSpeed
+        ? `Vitesse estimée : ${Math.round(effSpeed)} km/h · ${Math.round(gpxData.totalKm)} km`
+        : `Vitesse moyenne : ${document.getElementById('speed').value} km/h · ${Math.round(gpxData.totalKm)} km`;
+      document.getElementById('results').prepend(info);
+    }
     // sur mobile, referme le tiroir pour révéler la carte + le résultat
     if(window.matchMedia('(max-width:760px)').matches) closeSheet();
   }catch(err){ res.innerHTML=`<div class="msg">❌ ${err.message}</div>`; }
