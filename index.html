@@ -69,6 +69,16 @@
   .pt-b .ic{font-size:26px}
   .pt-b .tp{font-size:20px;font-weight:700}
   .pt-b .ds{font-size:12px;color:var(--mut)}
+  .pt-b .feels{font-size:11px;color:#7fbfff;font-weight:600;margin-left:8px}
+  .pt-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .pt-badges .badge{font-size:10.5px;font-weight:600;color:var(--txt);background:rgba(255,122,26,.14);border:1px solid rgba(255,122,26,.35);border-radius:20px;padding:2px 8px}
+  .hazard-alert{background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.5);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .hazard-head{font-size:14px;font-weight:800;color:#ff8a8a;margin-bottom:4px}
+  .hazard-sub{font-size:11.5px;color:var(--mut);margin-bottom:8px;line-height:1.35}
+  .hazard-list{margin:0;padding-left:18px;font-size:12.5px;color:var(--txt)}
+  .hazard-list li{margin:2px 0}
+  .hazmarker{font-size:26px;transform:translate(-50%,-50%);filter:drop-shadow(0 0 3px rgba(255,60,60,.9));animation:hazpulse 1.4s ease-in-out infinite}
+  @keyframes hazpulse{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.18)}}
   .rain{color:#4aa3ff}
   .warn{color:var(--acc)}
   .msg{font-size:13px;color:var(--mut);text-align:center;padding:20px}
@@ -76,6 +86,12 @@
   @keyframes s{to{transform:rotate(360deg)}}
   /* wrapper qui centre le panneau sur le point géographique */
   .wmarker{position:absolute;transform:translate(-50%,-50%)}
+  .wmarker .wsign{position:relative}
+  .wflags{position:absolute;top:-9px;right:-7px;display:flex;gap:2px;z-index:2}
+  .wflags .wflag{font-size:12px;line-height:1;background:var(--panel);border:1.5px solid var(--acc);
+    border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .wflags .wflag.wet{border-color:#4aa3ff}
   .wsign{background:var(--panel);border:2px solid #4aa3ff;border-radius:11px;
     display:flex;align-items:stretch;box-shadow:0 3px 8px rgba(0,0,0,.45);white-space:nowrap;font-weight:700;overflow:hidden}
   .wsign.risk{border-color:var(--acc)}
@@ -256,6 +272,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
 let layers = [];
 let weatherLayers = []; // panneaux météo, gérés à part pour le toggle afficher/masquer
 let lastData = null; // données du dernier calcul (pour le résumé)
+let hiddenHazards = []; // orages/dangers repérés ENTRE les points affichés
 function clearMap(){
   layers.forEach(l=>map.removeLayer(l)); layers=[];
   weatherLayers.forEach(l=>map.removeLayer(l)); weatherLayers=[];
@@ -503,14 +520,28 @@ async function forecast(pts, iso, effSpeed){
     const mins = sh*60+sm + (km/speed)*60;
     const hour = Math.min(23, Math.round(mins/60));
     const url=`https://api.open-meteo.com/v1/forecast?latitude=${pts[i].lat}&longitude=${pts[i].lon}`
-      +`&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_direction_10m`
+      +`&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m`
       +`&start_date=${iso}&end_date=${iso}&timezone=Europe%2FParis`;
     const j = await (await fetch(url)).json();
     const idx = Math.min(hour, j.hourly.time.length-1);
+    const temp = Math.round(j.hourly.temperature_2m[idx]);
+    const gust = Math.round(j.hourly.wind_gusts_10m[idx]);
+    // Route probablement mouillée : de la pluie est tombée dans les 3 h précédant le passage
+    let wetRoad = false;
+    for(let h=Math.max(0,idx-3); h<idx; h++){
+      if((j.hourly.precipitation[h]||0) >= 0.3) wetRoad = true;
+    }
+    // Ressenti moto : combine le refroidissement éolien météo (vent ambiant) et
+    // le vent relatif dû à la vitesse de roulage. En dessous de 10°C surtout.
+    const airSpeed = speed + Math.round(j.hourly.wind_speed_10m[idx]); // vitesse d'air ~ roulage + vent
+    const feels = motoWindchill(temp, airSpeed);
     out.push({...pts[i],
       km: Math.round(km),
       eta: `${String(Math.floor(mins/60)%24).padStart(2,'0')}h${String(Math.round(mins%60)).padStart(2,'0')}`,
-      temp: Math.round(j.hourly.temperature_2m[idx]),
+      temp,
+      feels,
+      wetRoad,
+      gust,
       pop: j.hourly.precipitation_probability[idx],
       wind: Math.round(j.hourly.wind_speed_10m[idx]),
       windDir: j.hourly.wind_direction_10m[idx], // d'où vient le vent, en degrés
@@ -518,6 +549,64 @@ async function forecast(pts, iso, effSpeed){
     });
   }
   return out;
+}
+
+// --- Scan « fin » des dangers entre les points affichés ---
+// Les points météo sont espacés de ~35 km : une cellule orageuse de 15-20 km peut
+// tomber entre deux points et passer inaperçue. On ré-échantillonne la route tous les
+// ~12 km, uniquement sur le code météo, pour repérer orages / forte pluie / neige cachés.
+// Renvoie la liste des dangers trouvés STRICTEMENT entre les points déjà affichés.
+async function scanHazardsBetween(routeLL, displayData, iso, effSpeed){
+  if(!routeLL || routeLL.length<2) return [];
+  const hav=(a,b)=>{const R=6371,r=x=>x*Math.PI/180;
+    const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]);
+    const x=Math.sin(dLat/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dLon/2)**2;
+    return R*2*Math.asin(Math.sqrt(x));};
+  const cum=[0];
+  for(let i=1;i<routeLL.length;i++) cum.push(cum[i-1]+hav(routeLL[i-1],routeLL[i]));
+  const total=cum[cum.length-1];
+  const at=(d)=>{ let i=1; while(i<cum.length && cum[i]<d) i++;
+    if(i>=cum.length) return routeLL[routeLL.length-1];
+    const t=(d-cum[i-1])/(cum[i]-cum[i-1]||1);
+    return [routeLL[i-1][0]+(routeLL[i][0]-routeLL[i-1][0])*t, routeLL[i-1][1]+(routeLL[i][1]-routeLL[i-1][1])*t]; };
+  const speed = effSpeed || (+document.getElementById('speed').value) || 65;
+  const [sh,sm] = document.getElementById('start').value.split(':').map(Number);
+  // distances déjà couvertes par un point affiché (±8 km) : on ne re-signale pas ces zones
+  const shownKm = displayData.map(d=>d.routeKm!=null?d.routeKm:d.km);
+  const covered = d => shownKm.some(k=>Math.abs(k-d)<=8);
+  const step=12; // km entre deux sondes fines
+  const hazards=[];
+  let lastHazKm=-99; // regroupe les sondes voisines en une seule alerte
+  for(let d=step; d<total; d+=step){
+    if(covered(d)) continue;
+    const ll=at(d);
+    const mins = sh*60+sm + (d/speed)*60;
+    const hour = Math.min(23, Math.round(mins/60));
+    const url=`https://api.open-meteo.com/v1/forecast?latitude=${ll[0]}&longitude=${ll[1]}`
+      +`&hourly=weather_code,precipitation_probability&start_date=${iso}&end_date=${iso}&timezone=Europe%2FParis`;
+    let j; try{ j=await (await fetch(url)).json(); }catch(e){ continue; }
+    const idx=Math.min(hour, j.hourly.time.length-1);
+    const code=j.hourly.weather_code[idx];
+    const pop=j.hourly.precipitation_probability[idx];
+    // dangers « cachés » qui méritent une alerte : orage, fortes averses, forte pluie/neige
+    const severe = code>=95 || code===82 || code===86 || [65,67,75,77].includes(code);
+    if(severe && (d-lastHazKm)>=step*1.5){ // évite les doublons collés
+      hazards.push({ km:Math.round(d),
+        eta:`${String(Math.floor(mins/60)%24).padStart(2,'0')}h${String(Math.round(mins%60)).padStart(2,'0')}`,
+        code, pop, lat:ll[0], lon:ll[1],
+        desc:(WMO[code]||['','?'])[1] });
+      lastHazKm=d;
+    }
+  }
+  return hazards;
+}
+// Formule JAG/TI (Météo-France, Environnement Canada), valide pour T<=10°C et vent>=4.8 km/h.
+// airKmh = vitesse d'air relative (roulage + vent ambiant).
+function motoWindchill(tempC, airKmh){
+  if(tempC>10 || airKmh<5) return tempC; // hors domaine : le ressenti ~ la temp réelle
+  const v = Math.pow(airKmh, 0.16);
+  const wc = 13.12 + 0.6215*tempC - 11.37*v + 0.3965*tempC*v;
+  return Math.round(wc);
 }
 
 // --- Force du vent → couleur + classe (seuils moto) ---
@@ -535,6 +624,7 @@ function windCardinal(deg){
 // --- Rendu ---
 function render(data, routeLL){
   clearMap();
+  hiddenHazards = []; // repartis à zéro à chaque calcul
   const res = document.getElementById('results');
   res.innerHTML='';
   const latlngs=[];
@@ -553,9 +643,16 @@ function render(data, routeLL){
           <span class="wc">${windCardinal(d.windDir)}</span>
         </div>`
       : '';
+    // petit indicateur d'alerte dans le coin du panneau (route mouillée, brouillard)
+    const isFogM = d.code===45 || d.code===48;
+    const cornerFlags = [];
+    if(d.wetRoad) cornerFlags.push('<span class="wflag wet" title="Risque route mouillée">💦</span>');
+    if(isFogM) cornerFlags.push('<span class="wflag fog" title="Brouillard">🌫️</span>');
+    const cornerHtml = cornerFlags.length ? `<div class="wflags">${cornerFlags.join('')}</div>` : '';
     const icon = L.divIcon({
       className:'', iconSize:null, iconAnchor:[0,0],
       html:`<div class="wmarker ${d.mid?'mid':''}">
+        ${cornerHtml}
         <div class="wsign ${risk?'risk':''} ${d.mid?'mid':''}">
           <div class="wleft">
             <div class="wtop"><span class="we">${ic}</span><span class="wt">${d.temp}°</span></div>
@@ -570,16 +667,26 @@ function render(data, routeLL){
     if(panelsOn) mk.addTo(map);
     weatherLayers.push(mk);
     const showArrow = showWind;
+    // Éléments d'info moto affichés seulement s'ils sont pertinents
+    const feelsTxt = (d.feels!=null && d.feels < d.temp-2) ? ` · ressenti ${d.feels}°C` : '';
+    const gustTxt = (d.gust!=null && d.gust >= d.wind+15 && d.gust>=30) ? ` · rafales ${d.gust}` : '';
+    const isFog = d.code===45 || d.code===48;
+    const badges = [];
+    if(d.wetRoad) badges.push('💦 risque route mouillée');
+    if(isFog) badges.push('🌫️ brouillard');
+    if(d.gust!=null && d.gust>=50) badges.push(`💨 rafales ${d.gust} km/h`);
+    const badgeLine = badges.length ? `<div class="pt-badges">${badges.map(b=>`<span class="badge">${b}</span>`).join('')}</div>` : '';
     mk.bindPopup(`<div class="pop-t">${d.name} · ${d.eta}</div>
-      <div class="pop-w"><span class="e">${ic}</span><span><b>${d.temp}°C</b> — ${desc}<br>
-      💧 ${d.pop}% · 💨 ${d.wind} km/h${showArrow?` (de ${windCardinal(d.windDir)})`:''} · ${d.km} km</span></div>`);
+      <div class="pop-w"><span class="e">${ic}</span><span><b>${d.temp}°C</b>${feelsTxt} — ${desc}<br>
+      💧 ${d.pop}% · 💨 ${d.wind} km/h${gustTxt}${showArrow?` (de ${windCardinal(d.windDir)})`:''} · ${d.km} km${badges.length?'<br>'+badges.join(' · '):''}</span></div>`);
     const card=document.createElement('div');
     card.className='pt'+(d.mid?' pt-mid':'');
     card.innerHTML=`<div class="pt-h"><span>${d.name}</span><span class="t">${d.eta} · ${d.km} km</span></div>
       <div class="pt-b"><span class="ic">${ic}</span>
-      <div><span class="tp">${d.temp}°C</span>
+      <div><span class="tp">${d.temp}°C</span>${feelsTxt?`<span class="feels">ressenti ${d.feels}°C</span>`:''}
       <div class="ds">${desc}</div>
-      <div class="ds ${d.pop>=50?'rain':''}">💧 ${d.pop}%${d.pop>=50?' ⚠️':''} · 💨 ${d.wind} km/h${showArrow?` (${windCardinal(d.windDir)})`:''}</div></div></div>`;
+      <div class="ds ${d.pop>=50?'rain':''}">💧 ${d.pop}%${d.pop>=50?' ⚠️':''} · 💨 ${d.wind} km/h${gustTxt}${showArrow?` (${windCardinal(d.windDir)})`:''}</div>
+      ${badgeLine}</div></div>`;
     card.onclick=()=>{ map.setView([d.lat,d.lon],11); if(!map.hasLayer(mk)) mk.addTo(map); mk.openPopup(); };
     res.appendChild(card);
   });
@@ -592,26 +699,73 @@ function render(data, routeLL){
   document.getElementById('summary').disabled = false;
 }
 
+// --- Affiche les dangers repérés ENTRE les points (bannière + marqueurs carte) ---
+function showHiddenHazards(hazards){
+  const res = document.getElementById('results');
+  // bannière d'alerte en tête de la liste
+  const isStorm = hazards.some(h=>h.code>=95);
+  const banner = document.createElement('div');
+  banner.className = 'hazard-alert';
+  const lignes = hazards.map(h=>`<li><b>${h.desc}</b> vers ${h.km} km (~${h.eta})</li>`).join('');
+  banner.innerHTML = `<div class="hazard-head">${isStorm?'⛈️':'⚠️'} Danger entre deux points</div>
+    <div class="hazard-sub">Repéré en analysant la route de plus près — ces zones tombent entre les points météo affichés :</div>
+    <ul class="hazard-list">${lignes}</ul>`;
+  res.prepend(banner);
+  // marqueurs distincts sur la carte
+  hazards.forEach(h=>{
+    const [ic] = WMO[h.code]||['⚠️'];
+    const icon = L.divIcon({ className:'', iconSize:null, iconAnchor:[0,0],
+      html:`<div class="hazmarker">${ic}</div>` });
+    const mk = L.marker([h.lat,h.lon],{icon, riseOnHover:true, zIndexOffset:1000}).addTo(map);
+    mk.bindPopup(`<div class="pop-t">⚠️ ${h.desc}</div>
+      <div class="pop-w"><span>Zone entre deux points météo<br>≈ ${h.km} km · ~${h.eta} · pluie ${h.pop}%</span></div>`);
+    weatherLayers.push(mk); // suit le toggle afficher/masquer comme les autres
+  });
+}
+
 // --- Score de confort moto (0-100) ---
 // Combine confort thermique, pluie et vent (relatif à la route si cap connu).
 function comfortScore(data){
   if(!data.length) return null;
+  // Danger propre au type de temps (indépendant de la proba de pluie) : un orage
+  // reste dangereux en moto même à faible probabilité affichée.
+  const codeHazard = c => {
+    if(c>=95) return 45;                          // orage
+    if(c===82||c===86) return 35;                 // fortes averses / averses de neige
+    if([65,67,75,77].includes(c)) return 30;      // forte pluie, verglas, forte neige, grésil
+    if([56,57,66,71,73,85].includes(c)) return 22;// bruine/pluie verglaçante, neige
+    if([63,80,81].includes(c)) return 15;         // pluie, averses
+    if([61,55].includes(c)) return 8;             // pluie légère, bruine dense
+    if([51,53,45,48].includes(c)) return 4;       // bruine, brouillard
+    return 0;
+  };
   const bearing=(a,b)=>{ // cap de a vers b en degrés
     const r=x=>x*Math.PI/180, dg=x=>x*180/Math.PI;
     const y=Math.sin(r(b.lon-a.lon))*Math.cos(r(b.lat));
     const x=Math.cos(r(a.lat))*Math.sin(r(b.lat))-Math.sin(r(a.lat))*Math.cos(r(b.lat))*Math.cos(r(b.lon-a.lon));
     return (dg(Math.atan2(y,x))+360)%360;
   };
-  let totalPenalty=0;
+  let hasStorm=false;
+  const penalties=[];
   data.forEach((d,i)=>{
     let p=0;
-    // température : idéal 15-25°C, pénalité croissante hors de cette plage
-    if(d.temp<15) p += (15-d.temp)*1.5;
+    // température : idéal 15-25°C. On pénalise sur le RESSENTI moto quand il fait froid
+    // (le vent relatif refroidit fortement), sur la temp réelle quand il fait chaud.
+    const coldRef = (d.feels!=null) ? d.feels : d.temp;
+    if(coldRef<15) p += (15-coldRef)*1.5;
     else if(d.temp>28) p += (d.temp-28)*1.5;
     // pluie : proportionnelle à la probabilité
-    p += d.pop*0.35;
-    // vent : dépend de la force et de l'angle relatif à la route
-    if(d.wind>=10){
+    p += d.pop*0.30;
+    // route mouillée (pluie tombée juste avant le passage) : adhérence réduite
+    if(d.wetRoad) p += 6;
+    // type de temps : orage, forte pluie, neige… pénalisés directement
+    p += codeHazard(d.code);
+    if(d.code>=95) hasStorm=true;
+    // vent : dépend de la force et de l'angle relatif à la route.
+    // On raisonne sur les RAFALES (plus dangereuses en 125 qu'un vent constant),
+    // avec repli sur le vent moyen si la rafale n'est pas connue.
+    const gustRef = (d.gust!=null && d.gust>d.wind) ? d.gust : d.wind;
+    if(gustRef>=10){
       // cap de roulage vers le point suivant (ou depuis le précédent au dernier point)
       let cap=null;
       if(i<data.length-1) cap=bearing(data[i], data[i+1]);
@@ -625,18 +779,27 @@ function comfortScore(data){
         else if(rel<135) factor=1.0;  // travers : le pire en 125
         else factor=0.8;              // de face
       }
-      p += (d.wind-10)*factor*0.8;
+      p += (gustRef-10)*factor*0.8;
     }
-    totalPenalty += p;
+    penalties.push(p);
   });
-  const avg = totalPenalty/data.length;
-  const score = Math.max(0, Math.min(100, Math.round(100-avg)));
+  const avg = penalties.reduce((a,b)=>a+b,0)/penalties.length;
+  const max = Math.max(...penalties);
+  // On mélange le pire point (55%) et la moyenne (45%) : un seul point dangereux
+  // ne peut plus être « noyé » par les points cléments du reste du trajet.
+  const blended = 0.55*max + 0.45*avg;
+  let score = Math.max(0, Math.min(100, Math.round(100-blended)));
+  // Plafonds durs : impossible d'être « excellent » avec un vrai danger sur la route.
+  if(hasStorm) score = Math.min(score, 35);      // orage quelque part
+  else if(max>=30) score = Math.min(score, 50);  // forte pluie / neige quelque part
   let mention;
   if(score>=85) mention='Excellent — conditions idéales';
   else if(score>=70) mention='Bon — sortie agréable';
   else if(score>=50) mention='Moyen — quelques désagréments';
-  else if(score>=30) mention='Difficile — vent ou pluie marqués';
+  else if(score>=30) mention='Difficile — pluie ou vent marqués';
   else mention='Défavorable — envisager un autre jour';
+  // Si un orage est prévu, il prime sur le libellé générique : c'est le vrai danger.
+  if(hasStorm) mention='Risqué — orage sur le parcours';
   return {score, mention};
 }
 
@@ -659,16 +822,29 @@ function buildSummary(data){
     s += `   ${bar}\n`;
     s += `   ${cs.mention}\n`;
   }
-  // alertes
-  const risky = data.filter(d=>isRisk(d.code) || d.pop>=50);
+  // dangers repérés ENTRE les points affichés (cellules orageuses étroites, etc.)
+  if(hiddenHazards.length){
+    s += `\n⛈️  DANGER ENTRE DEUX POINTS (${hiddenHazards.length})\n`;
+    s += `   Zones tombant entre les points météo, repérées en analysant la route de plus près :\n`;
+    hiddenHazards.forEach(h=>{
+      s += `   • ${h.desc} vers ${h.km} km (~${h.eta})\n`;
+    });
+  }
+  // alertes : pluie/orage, mais aussi fortes rafales, route mouillée, brouillard
+  const risky = data.filter(d=>isRisk(d.code) || d.pop>=50 || (d.gust!=null&&d.gust>=50) || d.wetRoad || d.code===45 || d.code===48);
   if(risky.length){
     s += `\n⚠️  VIGILANCE (${risky.length} point${risky.length>1?'s':''})\n`;
     risky.forEach(d=>{
       const desc = (WMO[d.code]||['','?'])[1];
-      s += `   • ${d.name} (${d.eta}) — ${desc}, pluie ${d.pop}%\n`;
+      const flags = [];
+      if(d.pop>=50) flags.push(`pluie ${d.pop}%`);
+      if(d.gust!=null && d.gust>=50) flags.push(`rafales ${d.gust} km/h`);
+      if(d.wetRoad) flags.push('chaussée humide');
+      if(d.code===45||d.code===48) flags.push('brouillard');
+      s += `   • ${d.name} (${d.eta}) — ${desc}${flags.length?', '+flags.join(', '):''}\n`;
     });
   }else{
-    s += `\n✅  Aucune pluie notable prévue sur le trajet.\n`;
+    s += `\n✅  Aucune vigilance particulière prévue sur le trajet.\n`;
   }
   s += `\n${'-'.repeat(40)}\n`;
   s += `DÉTAIL PAR POINT\n`;
@@ -678,7 +854,14 @@ function buildSummary(data){
     const tag = d.mid ? '' : '📍';
     s += `\n${tag} ${d.name}  ·  ${d.eta}  ·  ${d.km} km\n`;
     s += `   ${desc}\n`;
-    s += `   🌡️ ${d.temp}°C   💧 ${d.pop}%   💨 ${d.wind} km/h${d.windDir!=null&&d.wind>=5?` (de ${windCardinal(d.windDir)})`:''}\n`;
+    const feelsTxt = (d.feels!=null && d.feels < d.temp-2) ? ` (ressenti ${d.feels}°C)` : '';
+    const gustTxt = (d.gust!=null && d.gust >= d.wind+15 && d.gust>=30) ? `  🌬️ rafales ${d.gust}` : '';
+    s += `   🌡️ ${d.temp}°C${feelsTxt}   💧 ${d.pop}%   💨 ${d.wind} km/h${d.windDir!=null&&d.wind>=5?` (de ${windCardinal(d.windDir)})`:''}${gustTxt}\n`;
+    const notes = [];
+    if(d.wetRoad) notes.push('💦 chaussée probablement humide');
+    if(d.code===45||d.code===48) notes.push('🌫️ brouillard — visibilité réduite');
+    if(d.gust!=null && d.gust>=50) notes.push('⚠️ fortes rafales');
+    if(notes.length) s += `   ${notes.join('  ·  ')}\n`;
   });
   s += `\n${'='.repeat(40)}\n`;
   s += `Généré le ${new Date().toLocaleString('fr-FR')}\n`;
@@ -765,6 +948,9 @@ document.getElementById('go').addEventListener('click', async ()=>{
     }
     const data=await forecast(pts, iso, effSpeed);
     render(data, routeLL);
+    // Scan fin : orages/dangers tombant ENTRE les points affichés (cellules étroites)
+    hiddenHazards = await scanHazardsBetween(routeLL, data, iso, effSpeed);
+    if(hiddenHazards.length){ showHiddenHazards(hiddenHazards); }
     if(gpxData){
       const info=document.createElement('div');
       info.style.cssText='font-size:11px;color:var(--mut);font-weight:600;text-align:center;padding:8px 0';
